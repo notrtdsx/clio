@@ -54,7 +54,7 @@ clio
 
 ## Usage
 
-- Type a station name (example: `soma fm`)
+- Type a station name (example: `soma fm`, awesome radios btw)
 - Or use `tag:ambient` to search by tag
 - Enter a result number to play
 - Type `q` to quit
