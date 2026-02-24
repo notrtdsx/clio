@@ -1,0 +1,12 @@
+{
+  "name": "clio",
+  "version": "0.1.0",
+  "description": "Terminal internet radio browser",
+  "license": "MIT",
+  "bin": {
+    "clio": "bin/clio.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
