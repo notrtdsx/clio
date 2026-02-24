@@ -4,71 +4,60 @@ Command line radio for browsing and playing internet stations from your terminal
 
 ## Features
 
-- Search stations by name
-- Top voted and most clicked lists
-- Browse by tag, country, and language
+- Fast Rust CLI
+- Search stations by name or tag
 - Stream playback via `mpv`
-- Favorites saved locally
 - Click registration for community stats
 
 ## Requirements
 
-- Python 3.14 or newer
+- Rust (stable) and Cargo
 - `mpv` installed and in your PATH
 
-## Install
+## Build
 
 ```bash
 git clone https://github.com/notrtdsx/clio.git
 cd clio
+cargo build --release
 ```
 
-macOS/Linux:
-
-```bash
-python3 -m pip install -e .
-```
+## Install
 
 Windows (CMD):
 
 ```cmd
-python -m pip install -e .
+mkdir %LOCALAPPDATA%\clio
+copy target\release\clio.exe %LOCALAPPDATA%\clio\clio.exe
+setx PATH "%PATH%;%LOCALAPPDATA%\clio"
 ```
 
-Windows (Git Bash):
+Linux/macOS:
 
 ```bash
-python -m pip install -e .
+cargo install --path .
 ```
 
 ## Run
+
+Linux/macOS:
 
 ```bash
 clio
 ```
 
-Or without installing:
+Windows (CMD):
 
-```bash
-python -m clio
+```cmd
+clio
 ```
 
-## Controls
+## Usage
 
-- `tab` / `shift+tab`: switch tabs
-- `enter`: search/open selection or play station
-- `f`: add or remove favorite
-- `s`: stop playback
-- `q`: quit
-- `/` or `i`: focus the search input
-
-## Data
-
-Favorites are stored in your user config folder:
-
-- Windows: `%AppData%/clio/favorites.json`
-- macOS: `~/Library/Application Support/clio/favorites.json`
-- Linux: `~/.config/clio/favorites.json`
+- Type a station name (example: `soma fm`)
+- Or use `tag:ambient` to search by tag
+- Enter a result number to play
+- Type `q` to quit
 
 ## Radio Browser API
 
