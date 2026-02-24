@@ -4,57 +4,32 @@ Command line radio for browsing and playing internet stations from your terminal
 
 ## Features
 
-- Fast Rust CLI
-- Search stations by name or tag
+- Lightweight Node.js CLI
+- Interactive usage (no arguments)
 - Stream playback via `mpv`
 - Click registration for community stats
 
 ## Requirements
 
-- Rust (stable) and Cargo
+- Windows, Linux, or macOS
+- Node.js 18 or newer
 - `mpv` installed and in your PATH
-
-## Build
-
-```bash
-git clone https://github.com/notrtdsx/clio.git
-cd clio
-cargo build --release
-```
 
 ## Install
 
-Windows (CMD):
-
-```cmd
-mkdir %LOCALAPPDATA%\clio
-copy target\release\clio.exe %LOCALAPPDATA%\clio\clio.exe
-setx PATH "%PATH%;%LOCALAPPDATA%\clio"
-```
-
-Linux/macOS:
-
 ```bash
-cargo install --path .
+npm install -g .
 ```
 
 ## Run
 
-Linux/macOS:
-
 ```bash
-clio
-```
-
-Windows (CMD):
-
-```cmd
 clio
 ```
 
 ## Usage
 
-- Type a station name (example: `soma fm`, awesome radios btw)
+- Type a station name (example: `soma fm`)
 - Or use `tag:ambient` to search by tag
 - Enter a result number to play
 - Type `q` to quit
