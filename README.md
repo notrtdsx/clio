@@ -1,4 +1,4 @@
-# clio
+# clio v0.1
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
