@@ -21,21 +21,24 @@ Command line radio for browsing and playing internet stations from your terminal
 ```bash
 git clone https://github.com/notrtdsx/clio.git
 cd clio
-python -m venv .venv
 ```
 
 macOS/Linux:
 
 ```bash
-source .venv/bin/activate
-pip install -e .
+python3 -m pip install -e .
 ```
 
-Windows:
+Windows (CMD):
 
-```powershell
-.venv\Scripts\Activate.ps1
-pip install -e .
+```cmd
+python -m pip install -e .
+```
+
+Windows (Git Bash):
+
+```bash
+python -m pip install -e .
 ```
 
 ## Run
