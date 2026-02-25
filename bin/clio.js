@@ -173,6 +173,7 @@ function createPlayer(status, nowPlaying) {
   let pollTimer = null;
   let currentStation = "";
   let lastTrack = "";
+  let sessionId = 0;
 
   const stopPolling = () => {
     if (pollTimer) {
@@ -220,10 +221,13 @@ function createPlayer(status, nowPlaying) {
     }
     stop();
 
+    sessionId += 1;
+    const activeSession = sessionId;
+
     currentStation = name || "(unnamed station)";
     nowPlaying(currentStation, "");
 
-    socketPath = path.join(os.tmpdir(), `clio-mpv-${process.pid}.sock`);
+    socketPath = path.join(os.tmpdir(), `clio-mpv-${process.pid}-${activeSession}.sock`);
     safeUnlink(socketPath);
 
     const proc = spawn("mpv", ["--no-video", "--quiet", `--input-ipc-server=${socketPath}`, url], {
@@ -239,17 +243,19 @@ function createPlayer(status, nowPlaying) {
     }, 800);
 
     proc.on("error", (err) => {
-      if (mpvProcess === proc) {
-        mpvProcess = null;
+      if (mpvProcess !== proc || activeSession !== sessionId) {
+        return;
       }
+      mpvProcess = null;
       cleanup();
       status(`mpv error: ${err.message}`);
     });
 
     proc.on("close", (code) => {
-      if (mpvProcess === proc) {
-        mpvProcess = null;
+      if (mpvProcess !== proc || activeSession !== sessionId) {
+        return;
       }
+      mpvProcess = null;
       cleanup();
       if (code !== 0) {
         status("mpv exited with error");
