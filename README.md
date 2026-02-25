@@ -8,7 +8,6 @@ Command line radio for browsing and playing internet stations from your terminal
 - Search stations by name or tag
 - Now playing metadata when available
 - Stream playback via `mpv`
-- Click registration for community stats
 
 ## Requirements
 
