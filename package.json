@@ -6,6 +6,9 @@
   "bin": {
     "clio": "bin/clio.js"
   },
+  "dependencies": {
+    "blessed": "^0.1.81"
+  },
   "engines": {
     "node": ">=18"
   }
