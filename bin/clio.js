@@ -2,9 +2,13 @@
 
 const { spawn } = require("node:child_process");
 const dns = require("node:dns");
-const readline = require("node:readline");
+const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+const blessed = require("blessed");
 
 const DEFAULT_BASE_URL = "https://all.api.radio-browser.info";
+const RESULT_LIMIT = 25;
 
 async function resolveServer() {
   try {
@@ -77,103 +81,349 @@ async function registerClick(baseUrl, stationuuid) {
   }
 }
 
-function playStream(url) {
-  if (!url) {
-    throw new Error("station has no stream url");
+function safeUnlink(filePath) {
+  try {
+    if (filePath) {
+      require("node:fs").unlinkSync(filePath);
+    }
+  } catch {
+    // Best-effort cleanup.
   }
+}
+
+function normalizeMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object") {
+    return {};
+  }
+  const normalized = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (typeof value === "string" && value.trim()) {
+      normalized[key.toLowerCase()] = value.trim();
+    }
+  }
+  return normalized;
+}
+
+function pickTrackText(metadata, mediaTitle) {
+  const normalized = normalizeMetadata(metadata);
+  const artist = normalized.artist || normalized["album_artist"] || "";
+  const title = normalized.title || "";
+  if (artist && title) {
+    return `${artist} - ${title}`;
+  }
+
+  const streamTitle =
+    normalized["icy-title"] ||
+    normalized.streamtitle ||
+    normalized["icy_title"] ||
+    normalized["stream_title"] ||
+    "";
+  if (streamTitle) {
+    return streamTitle;
+  }
+
+  if (typeof mediaTitle === "string" && mediaTitle.trim()) {
+    return mediaTitle.trim();
+  }
+
+  return "";
+}
+
+function requestMpvProperty(socketPath, property) {
   return new Promise((resolve, reject) => {
-    const proc = spawn("mpv", ["--no-video", "--quiet", url], { stdio: "inherit" });
-    proc.on("error", reject);
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error("mpv exited with an error"));
+    const client = net.createConnection(socketPath);
+    let buffer = "";
+
+    const timeout = setTimeout(() => {
+      client.destroy();
+      reject(new Error("mpv ipc timeout"));
+    }, 800);
+
+    client.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+
+    client.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      if (lines.length > 1) {
+        const line = lines.shift().trim();
+        buffer = lines.join("\n");
+        clearTimeout(timeout);
+        try {
+          const payload = JSON.parse(line);
+          resolve(payload.data);
+        } catch (err) {
+          reject(err);
+        }
+        client.end();
       }
+    });
+
+    client.on("connect", () => {
+      client.write(JSON.stringify({ command: ["get_property", property] }) + "\n");
     });
   });
 }
 
-function promptLine(rl, label) {
-  return new Promise((resolve) => {
-    rl.question(label, (answer) => resolve(answer));
+function createPlayer(status, nowPlaying) {
+  let mpvProcess = null;
+  let socketPath = null;
+  let pollTimer = null;
+  let currentStation = "";
+  let lastTrack = "";
+
+  const stopPolling = () => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  const cleanup = () => {
+    stopPolling();
+    if (socketPath) {
+      safeUnlink(socketPath);
+      socketPath = null;
+    }
+  };
+
+  const pollMetadata = async () => {
+    if (!socketPath) {
+      return;
+    }
+    const metadata = await requestMpvProperty(socketPath, "metadata").catch(() => null);
+    const mediaTitle = await requestMpvProperty(socketPath, "media-title").catch(() => null);
+    const track = pickTrackText(metadata, mediaTitle);
+    if (track && track !== lastTrack) {
+      lastTrack = track;
+      nowPlaying(currentStation, track);
+    }
+  };
+
+  const stop = () => {
+    if (mpvProcess) {
+      mpvProcess.kill("SIGTERM");
+      mpvProcess = null;
+    }
+    cleanup();
+    lastTrack = "";
+    nowPlaying(currentStation, "");
+    status("stopped");
+  };
+
+  const play = (url, name) => {
+    if (!url) {
+      status("station has no stream url");
+      return;
+    }
+    stop();
+
+    currentStation = name || "(unnamed station)";
+    nowPlaying(currentStation, "");
+
+    socketPath = path.join(os.tmpdir(), `clio-mpv-${process.pid}.sock`);
+    safeUnlink(socketPath);
+
+    const proc = spawn("mpv", ["--no-video", "--quiet", `--input-ipc-server=${socketPath}`, url], {
+      stdio: "ignore",
+    });
+    mpvProcess = proc;
+
+    pollTimer = setInterval(() => {
+      pollMetadata().catch(() => {});
+    }, 2000);
+    setTimeout(() => {
+      pollMetadata().catch(() => {});
+    }, 800);
+
+    proc.on("error", (err) => {
+      if (mpvProcess === proc) {
+        mpvProcess = null;
+      }
+      cleanup();
+      status(`mpv error: ${err.message}`);
+    });
+
+    proc.on("close", (code) => {
+      if (mpvProcess === proc) {
+        mpvProcess = null;
+      }
+      cleanup();
+      if (code !== 0) {
+        status("mpv exited with error");
+      } else {
+        status("stopped");
+      }
+    });
+  };
+
+  return { play, stop };
+}
+
+function createUi() {
+  const screen = blessed.screen({
+    smartCSR: true,
+    title: "clio",
   });
+
+  const header = blessed.box({
+    top: 0,
+    left: 0,
+    height: 2,
+    width: "100%",
+    content: "clio - terminal radio\n/ or s search - enter play - x stop - q quit",
+    style: { fg: "cyan" },
+  });
+
+  const searchInput = blessed.textbox({
+    top: 2,
+    left: 0,
+    height: 3,
+    width: "100%",
+    label: " search ",
+    border: { type: "line" },
+    inputOnFocus: true,
+  });
+
+  const results = blessed.list({
+    top: 5,
+    left: 0,
+    height: "100%-6",
+    width: "100%",
+    label: " results ",
+    border: { type: "line" },
+    keys: true,
+    mouse: true,
+    vi: true,
+    style: {
+      selected: { bg: "blue", fg: "white" },
+    },
+  });
+
+  const statusBar = blessed.box({
+    bottom: 0,
+    left: 0,
+    height: 1,
+    width: "100%",
+    style: { bg: "white", fg: "black" },
+    content: "ready",
+  });
+
+  screen.append(header);
+  screen.append(searchInput);
+  screen.append(results);
+  screen.append(statusBar);
+
+  return { screen, searchInput, results, statusBar };
 }
 
 async function main() {
   const { baseUrl, warning } = await resolveServer();
+
+  const { screen, searchInput, results, statusBar } = createUi();
+  const nowPlayingState = { station: "-", track: "-" };
+  let statusMessage = "ready";
+
+  const renderStatusBar = () => {
+    const stationText = nowPlayingState.station || "-";
+    const trackText = nowPlayingState.track || "-";
+    let content = `station: ${stationText} | track: ${trackText}`;
+    if (statusMessage && statusMessage !== "ready") {
+      content += ` | ${statusMessage}`;
+    }
+    statusBar.setContent(content);
+    screen.render();
+  };
+
+  const status = (message) => {
+    statusMessage = message || "ready";
+    renderStatusBar();
+  };
+
+  const updateNowPlaying = (station, track) => {
+    nowPlayingState.station = station || "-";
+    nowPlayingState.track = track ? track : "(no metadata)";
+    renderStatusBar();
+  };
+
   if (warning) {
-    console.error(`warning: ${warning}`);
+    status(`warning: ${warning}`);
   }
 
-  console.log("clio - terminal radio");
-  console.log("type a station name (e.g. soma fm) or tag:ambient");
-  console.log("press q to quit\n");
+  const player = createPlayer(status, updateNowPlaying);
+  let stations = [];
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
+  const focusSearch = () => {
+    searchInput.focus();
+    searchInput.readInput();
+  };
+
+  const updateResults = (items) => {
+    results.setItems(items.length ? items : ["(no results)"]);
+    results.select(0);
+    screen.render();
+  };
+
+  const performSearch = async (query) => {
+    if (!query) {
+      status("enter a search query");
+      return;
+    }
+
+    status(`searching: ${query}`);
+    let payload;
+    try {
+      payload = await searchStations(baseUrl, query, RESULT_LIMIT);
+    } catch (err) {
+      status(`search error: ${err.message}`);
+      return;
+    }
+
+    if (!Array.isArray(payload) || !payload.length) {
+      stations = [];
+      updateResults([]);
+      status("no results");
+      return;
+    }
+
+    stations = payload;
+    updateResults(stations.map(formatStation));
+    status(`results: ${stations.length}`);
+    results.focus();
+  };
+
+  results.on("select", async (_, index) => {
+    const station = stations[index];
+    if (!station) {
+      return;
+    }
+    await registerClick(baseUrl, station.stationuuid);
+    const url = station.url_resolved || station.url || "";
+    player.play(url, station.name);
   });
 
-  try {
-    while (true) {
-      const query = (await promptLine(rl, "search> ")).trim();
-      if (!query) {
-        continue;
-      }
-      if (query.toLowerCase() === "q") {
-        break;
-      }
+  searchInput.on("submit", (value) => {
+    const query = value.trim();
+    searchInput.setValue(query);
+    performSearch(query);
+  });
 
-      let stations;
-      try {
-        stations = await searchStations(baseUrl, query, 20);
-      } catch (err) {
-        console.error(`error: ${err.message}`);
-        continue;
-      }
+  screen.key(["/", "s"], focusSearch);
+  screen.key(["x"], () => {
+    player.stop();
+  });
+  screen.key(["q", "C-c"], () => {
+    player.stop();
+    screen.destroy();
+    process.exit(0);
+  });
 
-      if (!Array.isArray(stations) || !stations.length) {
-        console.log("no results\n");
-        continue;
-      }
-
-      stations.forEach((station, index) => {
-        console.log(`${String(index + 1).padStart(2, " ")}. ${formatStation(station)}`);
-      });
-
-      const selection = (await promptLine(rl, "play # (enter to skip, q to quit)> ")).trim();
-      if (selection.toLowerCase() === "q") {
-        break;
-      }
-      if (!selection) {
-        console.log("");
-        continue;
-      }
-
-      const index = Number(selection);
-      if (!Number.isInteger(index) || index < 1 || index > stations.length) {
-        console.log("invalid selection\n");
-        continue;
-      }
-
-      const station = stations[index - 1];
-      const url = station.url_resolved || station.url || "";
-
-      await registerClick(baseUrl, station.stationuuid);
-
-      try {
-        console.log(`playing: ${station.name || "(unnamed station)"}`);
-        await playStream(url);
-      } catch (err) {
-        console.error(`play error: ${err.message}`);
-      }
-
-      console.log("");
-    }
-  } finally {
-    rl.close();
-  }
+  updateResults([]);
+  updateNowPlaying("-", "");
+  focusSearch();
+  screen.render();
 }
 
 main().catch((err) => {
