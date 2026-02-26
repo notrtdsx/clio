@@ -279,7 +279,7 @@ function createUi() {
     left: 0,
     height: 2,
     width: "100%",
-    content: "clio - terminal radio\n/ or s search - enter play - x stop - q quit",
+    content: "clio - terminal radio",
     style: { fg: "cyan" },
   });
 
@@ -296,7 +296,7 @@ function createUi() {
   const results = blessed.list({
     top: 5,
     left: 0,
-    height: "100%-6",
+    height: "100%-7",
     width: "100%",
     label: " results ",
     border: { type: "line" },
@@ -317,12 +317,22 @@ function createUi() {
     content: "ready",
   });
 
+  const helpBar = blessed.box({
+    bottom: 1,
+    left: 0,
+    height: 1,
+    width: "100%",
+    style: { bg: "blue", fg: "white" },
+    content: "^S Search  ^Enter Play  ^X Stop  ^Q Quit",
+  });
+
   screen.append(header);
   screen.append(searchInput);
   screen.append(results);
+  screen.append(helpBar);
   screen.append(statusBar);
 
-  return { screen, searchInput, results, statusBar };
+  return { screen, searchInput, results, statusBar, helpBar };
 }
 
 async function main() {
