@@ -43,15 +43,3 @@ clio
 ## Radio Browser API
 
 Clio discovers a working API server at startup using `all.api.radio-browser.info`. The project uses the official endpoints and registers clicks when you play a station.
-
-If you want to inspect endpoints manually:
-
-```text
-GET /json/stations/search
-GET /json/stations/topvote
-GET /json/stations/topclick
-GET /json/tags
-GET /json/countries
-GET /json/languages
-POST /json/url/{stationuuid}
-```
