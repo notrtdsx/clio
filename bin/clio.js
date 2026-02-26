@@ -331,6 +331,38 @@ async function main() {
   const { screen, searchInput, results, statusBar } = createUi();
   const nowPlayingState = { station: "-", track: "-" };
   let statusMessage = "ready";
+  let scrollTimer = null;
+  let scrollOffset = 0;
+  let scrollText = "";
+
+  const getStatusWidth = () => {
+    const width = typeof statusBar.width === "number" ? statusBar.width : screen.width;
+    return Math.max(1, width || 1);
+  };
+
+  const renderStatusBarFrame = () => {
+    const width = getStatusWidth();
+    if (!scrollText) {
+      statusBar.setContent("");
+      screen.render();
+      return;
+    }
+    if (scrollText.length <= width) {
+      statusBar.setContent(scrollText);
+      screen.render();
+      return;
+    }
+    const spacer = "   ";
+    const source = `${scrollText}${spacer}`;
+    const total = source.length;
+    const start = scrollOffset % total;
+    let view = source.slice(start, start + width);
+    if (view.length < width) {
+      view += source.slice(0, width - view.length);
+    }
+    statusBar.setContent(view);
+    screen.render();
+  };
 
   const renderStatusBar = () => {
     const stationText = nowPlayingState.station || "-";
@@ -339,8 +371,23 @@ async function main() {
     if (statusMessage && statusMessage !== "ready") {
       content += ` | ${statusMessage}`;
     }
-    statusBar.setContent(content);
-    screen.render();
+    scrollText = content;
+    scrollOffset = 0;
+    if (scrollText.length <= getStatusWidth()) {
+      if (scrollTimer) {
+        clearInterval(scrollTimer);
+        scrollTimer = null;
+      }
+      renderStatusBarFrame();
+      return;
+    }
+    if (!scrollTimer) {
+      scrollTimer = setInterval(() => {
+        scrollOffset += 1;
+        renderStatusBarFrame();
+      }, 200);
+    }
+    renderStatusBarFrame();
   };
 
   const status = (message) => {
@@ -422,8 +469,16 @@ async function main() {
   });
   screen.key(["q", "C-c"], () => {
     player.stop();
+    if (scrollTimer) {
+      clearInterval(scrollTimer);
+      scrollTimer = null;
+    }
     screen.destroy();
     process.exit(0);
+  });
+
+  screen.on("resize", () => {
+    renderStatusBar();
   });
 
   updateResults([]);
