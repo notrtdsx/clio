@@ -11,6 +11,7 @@ const blessed = require("blessed");
 const DEFAULT_BASE_URL = "https://all.api.radio-browser.info";
 const PAGE_SIZE = 25;
 const RESULT_LIMIT = 500;
+const SEARCH_RETRY_LIMIT = 3;
 
 async function resolveServer() {
   try {
@@ -51,7 +52,9 @@ async function searchStations(baseUrl, query, limit) {
 
   const response = await fetch(`${baseUrl}/json/stations/search?${params}`);
   if (!response.ok) {
-    throw new Error(`search failed with status ${response.status}`);
+    const err = new Error(`search failed with status ${response.status}`);
+    err.status = response.status;
+    throw err;
   }
   return response.json();
 }
@@ -91,166 +94,6 @@ function safeUnlink(filePath) {
   } catch {
     // Best-effort cleanup.
   }
-}
-
-function sanitizeFilePart(value) {
-  return String(value || "")
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function parseTrack(trackText) {
-  if (typeof trackText !== "string") {
-    return { artist: "", title: "" };
-  }
-  const trimmed = trackText.trim();
-  if (!trimmed) {
-    return { artist: "", title: "" };
-  }
-
-  const separatorIndex = trimmed.indexOf(" - ");
-  if (separatorIndex === -1) {
-    return { artist: "", title: trimmed };
-  }
-
-  return {
-    artist: trimmed.slice(0, separatorIndex).trim(),
-    title: trimmed.slice(separatorIndex + 3).trim(),
-  };
-}
-
-function createRecorder(status) {
-  let enabled = false;
-  let ffmpegProcess = null;
-  let activeTrack = "";
-  const recordingsDir = path.join(process.cwd(), "recordings");
-
-  const ensureRecordingsDir = () => {
-    fs.mkdirSync(recordingsDir, { recursive: true });
-  };
-
-  const buildOutputPath = (trackText) => {
-    const { artist, title } = parseTrack(trackText);
-    const safeArtist = sanitizeFilePart(artist);
-    const safeTitle = sanitizeFilePart(title);
-    const safeTrack = sanitizeFilePart(trackText);
-    const baseName =
-      safeArtist && safeTitle
-        ? `${safeArtist} - ${safeTitle}`
-        : safeTitle || safeArtist || safeTrack || "unknown-track";
-
-    let suffix = 0;
-    while (true) {
-      const candidateName = suffix === 0 ? `${baseName}.ogg` : `${baseName} (${suffix}).ogg`;
-      const candidatePath = path.join(recordingsDir, candidateName);
-      if (!fs.existsSync(candidatePath)) {
-        return candidatePath;
-      }
-      suffix += 1;
-    }
-  };
-
-  const stopRecordingProcess = () => {
-    if (!ffmpegProcess) {
-      return;
-    }
-    ffmpegProcess.kill("SIGINT");
-    ffmpegProcess = null;
-  };
-
-  const startRecording = (url, trackText) => {
-    if (!url || !trackText) {
-      return;
-    }
-
-    ensureRecordingsDir();
-    const outputPath = buildOutputPath(trackText);
-    const proc = spawn(
-      "ffmpeg",
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        url,
-        "-vn",
-        "-c:a",
-        "libvorbis",
-        "-y",
-        outputPath,
-      ],
-      { stdio: "ignore" }
-    );
-
-    ffmpegProcess = proc;
-    activeTrack = trackText;
-    status(`recording: ${trackText}`);
-
-    proc.on("error", (err) => {
-      if (ffmpegProcess !== proc) {
-        return;
-      }
-      ffmpegProcess = null;
-      status(`recorder error: ${err.message}`);
-    });
-
-    proc.on("close", (code) => {
-      if (ffmpegProcess === proc) {
-        ffmpegProcess = null;
-      }
-      const savedFile = path.basename(outputPath);
-      if (code === 0 || code === 255) {
-        status(`saved: ${savedFile}`);
-      } else {
-        status(`recorder exited with code ${code}`);
-      }
-    });
-  };
-
-  const handleTrackChange = ({ track, url, stopped }) => {
-    if (!enabled) {
-      return;
-    }
-
-    if (stopped || !url) {
-      stopRecordingProcess();
-      activeTrack = "";
-      return;
-    }
-
-    if (!track || track === "(no metadata)" || track === activeTrack) {
-      return;
-    }
-
-    stopRecordingProcess();
-    startRecording(url, track);
-  };
-
-  const toggle = (context) => {
-    enabled = !enabled;
-
-    if (!enabled) {
-      stopRecordingProcess();
-      activeTrack = "";
-      status("recorder off");
-      return;
-    }
-
-    status("recorder on");
-    if (context && context.url && context.track && context.track !== "(no metadata)") {
-      handleTrackChange(context);
-    }
-  };
-
-  const stop = () => {
-    stopRecordingProcess();
-    activeTrack = "";
-  };
-
-  const isEnabled = () => enabled;
-
-  return { handleTrackChange, toggle, stop, isEnabled };
 }
 
 function normalizeMetadata(metadata) {
@@ -329,12 +172,11 @@ function requestMpvProperty(socketPath, property) {
   });
 }
 
-function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
+function createPlayer(status, nowPlaying) {
   let mpvProcess = null;
   let socketPath = null;
   let pollTimer = null;
   let currentStation = "";
-  let currentUrl = "";
   let lastTrack = "";
   let sessionId = 0;
 
@@ -363,7 +205,6 @@ function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
     if (track && track !== lastTrack) {
       lastTrack = track;
       nowPlaying(currentStation, track);
-      onTrackChange({ station: currentStation, track, url: currentUrl, stopped: false });
     }
   };
 
@@ -375,8 +216,6 @@ function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
     cleanup();
     lastTrack = "";
     nowPlaying(currentStation, "");
-    onTrackChange({ station: currentStation, track: "", url: "", stopped: true });
-    currentUrl = "";
     status("stopped");
   };
 
@@ -391,7 +230,6 @@ function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
     const activeSession = sessionId;
 
     currentStation = name || "(unnamed station)";
-    currentUrl = url;
     nowPlaying(currentStation, "");
 
     socketPath = path.join(os.tmpdir(), `clio-mpv-${process.pid}-${activeSession}.sock`);
@@ -415,7 +253,6 @@ function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
       }
       mpvProcess = null;
       cleanup();
-      currentUrl = "";
       status(`mpv error: ${err.message}`);
     });
 
@@ -425,7 +262,6 @@ function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
       }
       mpvProcess = null;
       cleanup();
-      currentUrl = "";
       if (code !== 0) {
         status("mpv exited with error");
       } else {
@@ -492,7 +328,7 @@ function createUi() {
     height: 1,
     width: "100%",
     style: { bg: "blue", fg: "white" },
-    content: "^S Search  ^Enter Play  ^N Next  ^P Prev  ^R Record  ^X Stop  ^Q Quit",
+    content: "^S Search  ^Enter Play  ^N Next  ^P Prev  ^X Stop  ^Q Quit",
   });
 
   screen.append(header);
@@ -506,6 +342,7 @@ function createUi() {
 
 async function main() {
   const { baseUrl, warning } = await resolveServer();
+  let activeBaseUrl = baseUrl;
 
   const { screen, searchInput, results, statusBar } = createUi();
   const nowPlayingState = { station: "-", track: "-" };
@@ -584,11 +421,9 @@ async function main() {
     status(`warning: ${warning}`);
   }
 
-  const recorder = createRecorder(status);
-  const player = createPlayer(status, updateNowPlaying, recorder.handleTrackChange);
+  const player = createPlayer(status, updateNowPlaying);
   let stations = [];
   let currentPage = 0;
-  let currentStreamUrl = "";
 
   const focusSearch = () => {
     searchInput.focus();
@@ -634,7 +469,28 @@ async function main() {
     status(`searching: ${query}`);
     let payload;
     try {
-      payload = await searchStations(baseUrl, query, RESULT_LIMIT);
+      let lastError = null;
+      for (let attempt = 1; attempt <= SEARCH_RETRY_LIMIT; attempt += 1) {
+        try {
+          payload = await searchStations(activeBaseUrl, query, RESULT_LIMIT);
+          break;
+        } catch (err) {
+          lastError = err;
+          const statusCode = Number(err && err.status);
+          const shouldRetry = !statusCode || statusCode >= 500;
+          if (!shouldRetry || attempt === SEARCH_RETRY_LIMIT) {
+            break;
+          }
+
+          const refreshed = await resolveServer();
+          activeBaseUrl = refreshed.baseUrl || DEFAULT_BASE_URL;
+          status(`search retry ${attempt + 1}/${SEARCH_RETRY_LIMIT}...`);
+        }
+      }
+
+      if (!payload) {
+        throw lastError || new Error("search failed");
+      }
     } catch (err) {
       status(`search error: ${err.message}`);
       return;
@@ -655,22 +511,13 @@ async function main() {
     results.focus();
   };
 
-  const getCurrentStationContext = () => {
-    return {
-      station: nowPlayingState.station,
-      track: nowPlayingState.track,
-      url: currentStreamUrl,
-    };
-  };
-
   results.on("select", async (_, index) => {
     const station = stations[currentPage * PAGE_SIZE + index];
     if (!station) {
       return;
     }
-    await registerClick(baseUrl, station.stationuuid);
+    await registerClick(activeBaseUrl, station.stationuuid);
     const url = station.url_resolved || station.url || "";
-    currentStreamUrl = url;
     player.play(url, station.name);
   });
 
@@ -687,17 +534,10 @@ async function main() {
   screen.key(["p", "pageup"], () => {
     goToPage(currentPage - 1);
   });
-  screen.key(["r"], () => {
-    recorder.toggle(getCurrentStationContext());
-  });
   screen.key(["x"], () => {
-    recorder.stop();
-    currentStreamUrl = "";
     player.stop();
   });
   screen.key(["q", "C-c"], () => {
-    recorder.stop();
-    currentStreamUrl = "";
     player.stop();
     if (scrollTimer) {
       clearInterval(scrollTimer);
