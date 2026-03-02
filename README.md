@@ -11,7 +11,7 @@ Command line radio for browsing and playing internet stations from your terminal
 
 ## Requirements
 
-- Windows, Linux, or macOS
+- Windows, Linux (recommended), or macOS
 - Node.js 18 or newer
 - `mpv` installed and in your PATH
 
