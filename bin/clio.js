@@ -2,13 +2,15 @@
 
 const { spawn } = require("node:child_process");
 const dns = require("node:dns");
+const fs = require("node:fs");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const blessed = require("blessed");
 
 const DEFAULT_BASE_URL = "https://all.api.radio-browser.info";
-const RESULT_LIMIT = 25;
+const PAGE_SIZE = 25;
+const RESULT_LIMIT = 500;
 
 async function resolveServer() {
   try {
@@ -84,11 +86,171 @@ async function registerClick(baseUrl, stationuuid) {
 function safeUnlink(filePath) {
   try {
     if (filePath) {
-      require("node:fs").unlinkSync(filePath);
+      fs.unlinkSync(filePath);
     }
   } catch {
     // Best-effort cleanup.
   }
+}
+
+function sanitizeFilePart(value) {
+  return String(value || "")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseTrack(trackText) {
+  if (typeof trackText !== "string") {
+    return { artist: "", title: "" };
+  }
+  const trimmed = trackText.trim();
+  if (!trimmed) {
+    return { artist: "", title: "" };
+  }
+
+  const separatorIndex = trimmed.indexOf(" - ");
+  if (separatorIndex === -1) {
+    return { artist: "", title: trimmed };
+  }
+
+  return {
+    artist: trimmed.slice(0, separatorIndex).trim(),
+    title: trimmed.slice(separatorIndex + 3).trim(),
+  };
+}
+
+function createRecorder(status) {
+  let enabled = false;
+  let ffmpegProcess = null;
+  let activeTrack = "";
+  const recordingsDir = path.join(process.cwd(), "recordings");
+
+  const ensureRecordingsDir = () => {
+    fs.mkdirSync(recordingsDir, { recursive: true });
+  };
+
+  const buildOutputPath = (trackText) => {
+    const { artist, title } = parseTrack(trackText);
+    const safeArtist = sanitizeFilePart(artist);
+    const safeTitle = sanitizeFilePart(title);
+    const safeTrack = sanitizeFilePart(trackText);
+    const baseName =
+      safeArtist && safeTitle
+        ? `${safeArtist} - ${safeTitle}`
+        : safeTitle || safeArtist || safeTrack || "unknown-track";
+
+    let suffix = 0;
+    while (true) {
+      const candidateName = suffix === 0 ? `${baseName}.ogg` : `${baseName} (${suffix}).ogg`;
+      const candidatePath = path.join(recordingsDir, candidateName);
+      if (!fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
+      suffix += 1;
+    }
+  };
+
+  const stopRecordingProcess = () => {
+    if (!ffmpegProcess) {
+      return;
+    }
+    ffmpegProcess.kill("SIGINT");
+    ffmpegProcess = null;
+  };
+
+  const startRecording = (url, trackText) => {
+    if (!url || !trackText) {
+      return;
+    }
+
+    ensureRecordingsDir();
+    const outputPath = buildOutputPath(trackText);
+    const proc = spawn(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        url,
+        "-vn",
+        "-c:a",
+        "libvorbis",
+        "-y",
+        outputPath,
+      ],
+      { stdio: "ignore" }
+    );
+
+    ffmpegProcess = proc;
+    activeTrack = trackText;
+    status(`recording: ${trackText}`);
+
+    proc.on("error", (err) => {
+      if (ffmpegProcess !== proc) {
+        return;
+      }
+      ffmpegProcess = null;
+      status(`recorder error: ${err.message}`);
+    });
+
+    proc.on("close", (code) => {
+      if (ffmpegProcess === proc) {
+        ffmpegProcess = null;
+      }
+      const savedFile = path.basename(outputPath);
+      if (code === 0 || code === 255) {
+        status(`saved: ${savedFile}`);
+      } else {
+        status(`recorder exited with code ${code}`);
+      }
+    });
+  };
+
+  const handleTrackChange = ({ track, url, stopped }) => {
+    if (!enabled) {
+      return;
+    }
+
+    if (stopped || !url) {
+      stopRecordingProcess();
+      activeTrack = "";
+      return;
+    }
+
+    if (!track || track === "(no metadata)" || track === activeTrack) {
+      return;
+    }
+
+    stopRecordingProcess();
+    startRecording(url, track);
+  };
+
+  const toggle = (context) => {
+    enabled = !enabled;
+
+    if (!enabled) {
+      stopRecordingProcess();
+      activeTrack = "";
+      status("recorder off");
+      return;
+    }
+
+    status("recorder on");
+    if (context && context.url && context.track && context.track !== "(no metadata)") {
+      handleTrackChange(context);
+    }
+  };
+
+  const stop = () => {
+    stopRecordingProcess();
+    activeTrack = "";
+  };
+
+  const isEnabled = () => enabled;
+
+  return { handleTrackChange, toggle, stop, isEnabled };
 }
 
 function normalizeMetadata(metadata) {
@@ -167,11 +329,12 @@ function requestMpvProperty(socketPath, property) {
   });
 }
 
-function createPlayer(status, nowPlaying) {
+function createPlayer(status, nowPlaying, onTrackChange = () => {}) {
   let mpvProcess = null;
   let socketPath = null;
   let pollTimer = null;
   let currentStation = "";
+  let currentUrl = "";
   let lastTrack = "";
   let sessionId = 0;
 
@@ -200,6 +363,7 @@ function createPlayer(status, nowPlaying) {
     if (track && track !== lastTrack) {
       lastTrack = track;
       nowPlaying(currentStation, track);
+      onTrackChange({ station: currentStation, track, url: currentUrl, stopped: false });
     }
   };
 
@@ -211,6 +375,8 @@ function createPlayer(status, nowPlaying) {
     cleanup();
     lastTrack = "";
     nowPlaying(currentStation, "");
+    onTrackChange({ station: currentStation, track: "", url: "", stopped: true });
+    currentUrl = "";
     status("stopped");
   };
 
@@ -225,6 +391,7 @@ function createPlayer(status, nowPlaying) {
     const activeSession = sessionId;
 
     currentStation = name || "(unnamed station)";
+    currentUrl = url;
     nowPlaying(currentStation, "");
 
     socketPath = path.join(os.tmpdir(), `clio-mpv-${process.pid}-${activeSession}.sock`);
@@ -248,6 +415,7 @@ function createPlayer(status, nowPlaying) {
       }
       mpvProcess = null;
       cleanup();
+      currentUrl = "";
       status(`mpv error: ${err.message}`);
     });
 
@@ -257,6 +425,7 @@ function createPlayer(status, nowPlaying) {
       }
       mpvProcess = null;
       cleanup();
+      currentUrl = "";
       if (code !== 0) {
         status("mpv exited with error");
       } else {
@@ -323,7 +492,7 @@ function createUi() {
     height: 1,
     width: "100%",
     style: { bg: "blue", fg: "white" },
-    content: "^S Search  ^Enter Play  ^X Stop  ^Q Quit",
+    content: "^S Search  ^Enter Play  ^N Next  ^P Prev  ^R Record  ^X Stop  ^Q Quit",
   });
 
   screen.append(header);
@@ -415,18 +584,45 @@ async function main() {
     status(`warning: ${warning}`);
   }
 
-  const player = createPlayer(status, updateNowPlaying);
+  const recorder = createRecorder(status);
+  const player = createPlayer(status, updateNowPlaying, recorder.handleTrackChange);
   let stations = [];
+  let currentPage = 0;
+  let currentStreamUrl = "";
 
   const focusSearch = () => {
     searchInput.focus();
     searchInput.readInput();
   };
 
-  const updateResults = (items) => {
+  const getTotalPages = () => Math.max(1, Math.ceil(stations.length / PAGE_SIZE));
+
+  const updateResults = () => {
+    const totalPages = getTotalPages();
+    currentPage = Math.min(Math.max(currentPage, 0), totalPages - 1);
+
+    const start = currentPage * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const items = stations.slice(start, end).map(formatStation);
+
+    results.setLabel(` results (page ${currentPage + 1}/${totalPages}) `);
     results.setItems(items.length ? items : ["(no results)"]);
     results.select(0);
     screen.render();
+  };
+
+  const goToPage = (page) => {
+    if (!stations.length) {
+      return;
+    }
+    const totalPages = getTotalPages();
+    const nextPage = Math.min(Math.max(page, 0), totalPages - 1);
+    if (nextPage === currentPage) {
+      return;
+    }
+    currentPage = nextPage;
+    updateResults();
+    status(`results: ${stations.length} | page ${currentPage + 1}/${totalPages}`);
   };
 
   const performSearch = async (query) => {
@@ -446,24 +642,35 @@ async function main() {
 
     if (!Array.isArray(payload) || !payload.length) {
       stations = [];
-      updateResults([]);
+      currentPage = 0;
+      updateResults();
       status("no results");
       return;
     }
 
     stations = payload;
-    updateResults(stations.map(formatStation));
-    status(`results: ${stations.length}`);
+    currentPage = 0;
+    updateResults();
+    status(`results: ${stations.length} | page 1/${getTotalPages()}`);
     results.focus();
   };
 
+  const getCurrentStationContext = () => {
+    return {
+      station: nowPlayingState.station,
+      track: nowPlayingState.track,
+      url: currentStreamUrl,
+    };
+  };
+
   results.on("select", async (_, index) => {
-    const station = stations[index];
+    const station = stations[currentPage * PAGE_SIZE + index];
     if (!station) {
       return;
     }
     await registerClick(baseUrl, station.stationuuid);
     const url = station.url_resolved || station.url || "";
+    currentStreamUrl = url;
     player.play(url, station.name);
   });
 
@@ -474,10 +681,23 @@ async function main() {
   });
 
   screen.key(["/", "s"], focusSearch);
+  screen.key(["n", "pagedown"], () => {
+    goToPage(currentPage + 1);
+  });
+  screen.key(["p", "pageup"], () => {
+    goToPage(currentPage - 1);
+  });
+  screen.key(["r"], () => {
+    recorder.toggle(getCurrentStationContext());
+  });
   screen.key(["x"], () => {
+    recorder.stop();
+    currentStreamUrl = "";
     player.stop();
   });
   screen.key(["q", "C-c"], () => {
+    recorder.stop();
+    currentStreamUrl = "";
     player.stop();
     if (scrollTimer) {
       clearInterval(scrollTimer);
@@ -491,7 +711,7 @@ async function main() {
     renderStatusBar();
   });
 
-  updateResults([]);
+  updateResults();
   updateNowPlaying("-", "");
   focusSearch();
   screen.render();
