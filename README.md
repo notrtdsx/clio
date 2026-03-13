@@ -2,6 +2,8 @@
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
+Tested on Debian Testing!
+
 ## Features
 
 - Lightweight Node.js CLI
