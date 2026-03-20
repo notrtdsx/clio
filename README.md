@@ -13,7 +13,7 @@ Tested on: Debian Testing, Arch Linux, Windows 10, Ubuntu 24.04.4 LTS and Termux
 ## Requirements
 
 - Windows, Linux (recommended), or macOS
-- Node.js 18 or newer
+- Node.js v25.8.1
 - `mpv` installed and in your PATH
 
 ## Install
