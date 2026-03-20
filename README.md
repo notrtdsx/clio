@@ -9,7 +9,6 @@ Tested on: Debian Testing, Arch Linux, Windows 10, Ubuntu 24.04.4 LTS and Termux
 - Lightweight Node.js CLI
 - Interactive usage (no arguments)
 - Stream playback via `mpv`
-- Click registration for community stats
 
 ## Requirements
 
