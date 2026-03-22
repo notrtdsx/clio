@@ -340,52 +340,11 @@ function createUi() {
   return { screen, searchInput, results, statusBar, helpBar };
 }
 
-
-// Check if mpv is available in PATH
-function checkMpvAvailable() {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("mpv", ["--version"]);
-    proc.on("error", (err) => {
-      reject(new Error("mpv is not installed or not in PATH"));
-    });
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error("mpv is not installed or not in PATH"));
-      }
-    });
-  });
-}
-
 async function main() {
-  let screen, statusBar;
-  try {
-    await checkMpvAvailable();
-  } catch (err) {
-    // Minimal UI to show error if mpv is missing
-    const blessed = require("blessed");
-    screen = blessed.screen({ smartCSR: true, title: "clio" });
-    statusBar = blessed.box({ bottom: 0, left: 0, height: 1, width: "100%", style: { bg: "white", fg: "black" }, content: err.message });
-    screen.append(statusBar);
-    screen.render();
-    setTimeout(() => { process.exit(1); }, 4000);
-    return;
-  }
+  const { baseUrl, warning } = await resolveServer();
+  let activeBaseUrl = baseUrl;
 
-  let activeBaseUrl, warning;
-  try {
-    const resolved = await resolveServer();
-    activeBaseUrl = resolved.baseUrl;
-    warning = resolved.warning;
-  } catch (err) {
-    activeBaseUrl = DEFAULT_BASE_URL;
-    warning = `server resolve error: ${err.message}`;
-  }
-
-  const { screen: uiScreen, searchInput, results, statusBar: uiStatusBar } = createUi();
-  screen = uiScreen;
-  statusBar = uiStatusBar;
+  const { screen, searchInput, results, statusBar } = createUi();
   const nowPlayingState = { station: "-", track: "-" };
   let statusMessage = "ready";
   let scrollTimer = null;
@@ -553,27 +512,19 @@ async function main() {
   };
 
   results.on("select", async (_, index) => {
-    try {
-      const station = stations[currentPage * PAGE_SIZE + index];
-      if (!station) {
-        return;
-      }
-      await registerClick(activeBaseUrl, station.stationuuid);
-      const url = station.url_resolved || station.url || "";
-      player.play(url, station.name);
-    } catch (err) {
-      status(`play error: ${err.message}`);
+    const station = stations[currentPage * PAGE_SIZE + index];
+    if (!station) {
+      return;
     }
+    await registerClick(activeBaseUrl, station.stationuuid);
+    const url = station.url_resolved || station.url || "";
+    player.play(url, station.name);
   });
 
   searchInput.on("submit", (value) => {
-    try {
-      const query = value.trim();
-      searchInput.setValue(query);
-      performSearch(query);
-    } catch (err) {
-      status(`search error: ${err.message}`);
-    }
+    const query = value.trim();
+    searchInput.setValue(query);
+    performSearch(query);
   });
 
   screen.key(["/", "s"], focusSearch);
@@ -607,16 +558,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // Fallback: show error in a minimal UI if possible
-  try {
-    const blessed = require("blessed");
-    const screen = blessed.screen({ smartCSR: true, title: "clio" });
-    const statusBar = blessed.box({ bottom: 0, left: 0, height: 1, width: "100%", style: { bg: "white", fg: "black" }, content: `fatal error: ${err.message}` });
-    screen.append(statusBar);
-    screen.render();
-    setTimeout(() => { process.exit(1); }, 4000);
-  } catch (e) {
-    console.error(`fatal error: ${err.message}`);
-    process.exit(1);
-  }
+  console.error(`error: ${err.message}`);
+  process.exit(1);
 });
