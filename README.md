@@ -1,7 +1,5 @@
 # clio v0.1.1.1 - The Page Update
 
-IF YOU WANT THE STABLE VERSION, GO TO THE STABLE BRANCH!
-
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
 Tested on: Debian Testing, Arch Linux, Windows 10, Ubuntu 24.04.4 LTS and Termux on Android
