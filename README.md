@@ -1,6 +1,6 @@
 # clio v0.1.1.1 - The Page Update
 
-IF YOU WANT THE STABLE VERSION, GO TO THE STABLE BRANCH!
+this is the main branch.. it might be unstable here lol IF YOU WANT THE STABLE VERSION, GO TO THE STABLE BRANCH!
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
