@@ -4,7 +4,7 @@ this is the main branch.. it might be unstable here lol IF YOU WANT THE STABLE V
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
-Tested on: Debian Testing, Arch Linux, Ubuntu 24.04.4 LTS and Termux on Android
+Tested on: Debian Testing, Arch Linux, Ubuntu 24.04.4 LTS and Termux
 
 ## Features
 
