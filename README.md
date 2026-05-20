@@ -1,6 +1,6 @@
-## This project has moved to Codeberg: https://codeberg.org/notrtdsx/clio
+# This project has moved to Codeberg: https://codeberg.org/notrtdsx/clio
 
-# clio v0.1.1.1 - The Page Update
+## clio v0.1.1.1 - The Page Update
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
