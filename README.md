@@ -1,3 +1,5 @@
+## This project has moved to Codeberg: https://codeberg.org/notrtdsx/clio
+
 # clio v0.1.1.1 - The Page Update
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
@@ -38,6 +40,5 @@ clio
 ## Radio Browser API
 
 Clio discovers a working API server at startup using `all.api.radio-browser.info`. The project uses the official endpoints and registers clicks when you play a station.
-
 
 For legal reasons, Clio only fetches and uses stream URLs provided by [radio-browser.info](https://radio-browser.info) and does not host or redistribute any streams itself.
