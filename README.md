@@ -2,7 +2,7 @@
 
 Command line radio for browsing and playing internet stations from your terminal. Powered by the Radio Browser API.
 
-Tested on: Debian Testing, Arch Linux, Ubuntu 24.04.4 LTS and Termux
+Tested on: Debian Testing, Arch Linux, EndeavourOS, Ubuntu 24.04.4 LTS and Termux
 
 ## Features
 
@@ -38,3 +38,6 @@ clio
 ## Radio Browser API
 
 Clio discovers a working API server at startup using `all.api.radio-browser.info`. The project uses the official endpoints and registers clicks when you play a station.
+
+
+For legal reasons, stream URLs are sourced from [radio-browser.info](https://radio-browser.info).
