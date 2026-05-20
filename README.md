@@ -40,4 +40,4 @@ clio
 Clio discovers a working API server at startup using `all.api.radio-browser.info`. The project uses the official endpoints and registers clicks when you play a station.
 
 
-For legal reasons, stream URLs are sourced from [radio-browser.info](https://radio-browser.info).
+For legal reasons, Clio only fetches and uses stream URLs provided by [radio-browser.info](https://radio-browser.info) and does not host or redistribute any streams itself.
