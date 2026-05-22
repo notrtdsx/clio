@@ -1,4 +1,4 @@
-# This project has moved to Codeberg: https://codeberg.org/notrtdsx/clio
+# This project is Codeberg too: https://codeberg.org/notrtdsx/clio
 
 ## clio v0.1.1.1 - The Page Update
 
